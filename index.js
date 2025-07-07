@@ -37,7 +37,7 @@ async function run() {
     app.post("/jwt", async (req, res) => {
       const user = req.body;
       const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
-        expiresIn: "1h",
+        expiresIn: "4hr",
       });
       res.send({ token });
     });
@@ -141,12 +141,12 @@ async function run() {
       res.send(result);
     });
 
-    app.get('/menu/:id', async (req, res) =>{
+    app.get("/menu/:id", async (req, res) => {
       const id = req.params.id;
-      const query = {_id: new ObjectId(id)}
+      const query = { _id: new ObjectId(id) };
       const result = await menuCollection.findOne(query);
-      res.send(result)
-    })
+      res.send(result);
+    });
 
     app.post("/menu", veriFyToken, verifyAdmin, async (req, res) => {
       const item = req.body;
@@ -154,29 +154,29 @@ async function run() {
       res.send(result);
     });
 
-    app.patch('/menu/:id', async (req, res)=>{
+    app.patch("/menu/:id", async (req, res) => {
       const item = req.body;
       const id = req.params.id;
-      const filter = {_id: new ObjectId(id)}
-      const updatedDoc ={
-        $set:{
+      const filter = { _id: new ObjectId(id) };
+      const updatedDoc = {
+        $set: {
           name: item.name,
-          category : item.category,
+          category: item.category,
           price: item.price,
           recipe: item.recipe,
-          image: item.image
-        }
-      }
-      const result = await menuCollection.updateOne(filter, updatedDoc)
-      res.send(result)
-    })
-    
-    app.delete('/menu/:id',veriFyToken, verifyAdmin, async (req, res) => {
+          image: item.image,
+        },
+      };
+      const result = await menuCollection.updateOne(filter, updatedDoc);
+      res.send(result);
+    });
+
+    app.delete("/menu/:id", veriFyToken, verifyAdmin, async (req, res) => {
       const id = req.params.id;
-      const query = {_id: new ObjectId(id)}
+      const query = { _id: new ObjectId(id) };
       const result = await menuCollection.deleteOne(query);
-      res.send(result); 
-    })
+      res.send(result);
+    });
 
     // carts collection
     app.get("/carts", async (req, res) => {
@@ -200,44 +200,79 @@ async function run() {
     });
 
     //payment intent
-    app.post('/create-payment-intent' , async (req, res)=>{
-      const {price} = req.body;
+    app.post("/create-payment-intent", async (req, res) => {
+      const { price } = req.body;
       const amount = parseFloat(price * 100);
 
-      console.log(amount, 'amount inside the intent');
+      console.log(amount, "amount inside the intent");
 
       const paymentIntent = await stripe.paymentIntents.create({
         amount: amount,
-        currency: 'usd',
-        payment_method_types: ['card']
+        currency: "usd",
+        payment_method_types: ["card"],
       });
 
       res.send({
-        clientSecret: paymentIntent.client_secret
-      })
-    })
+        clientSecret: paymentIntent.client_secret,
+      });
+    });
 
-    app.get('/payments/:email',veriFyToken, async(req, res)=>{
-      const query = {email: req.params.email}
-      if(req.params.email !== req.decoded.email){
-        return res.status(403).send({message: 'forbidden access'})
+    app.get("/payments/:email", veriFyToken, async (req, res) => {
+      const query = { email: req.params.email };
+      if (req.params.email !== req.decoded.email) {
+        return res.status(403).send({ message: "forbidden access" });
       }
-      const result = await paymentCollection.find().toArray();
-      res.send(result)
-    })
+      const result = await paymentCollection.find(query).toArray();
+      res.send(result);
+    });
 
-    app.post('/payments', async(req, res)=>{
+    app.post("/payments", async (req, res) => {
       const payment = req.body;
       const paymentResult = await paymentCollection.insertOne(payment);
-      //carefully delete each item from the cart 
-      console.log('payment info', payment);
-      const query = {_id: {
-        $in: payment.cartIds.map(id => new ObjectId(id))
-      }};
+      //carefully delete each item from the cart
+      console.log("payment info", payment);
+      const query = {
+        _id: {
+          $in: payment.cartIds.map((id) => new ObjectId(id)),
+        },
+      };
 
-      const deleteResult = await cartsCollection.deleteMany(query)
-     res.send({paymentResult, deleteResult})
-    })
+      const deleteResult = await cartsCollection.deleteMany(query);
+      res.send({ paymentResult, deleteResult });
+    });
+
+    //stats or analytics
+    app.get("/admin-stats",veriFyToken, verifyAdmin, async (req, res) => {
+      const users = await userCollection.estimatedDocumentCount();
+      const menuItems = await menuCollection.estimatedDocumentCount();
+      const orders = await paymentCollection.estimatedDocumentCount();
+
+      // this not the best way
+      // const payment = await paymentCollection.find().toArray();
+      // const revenue = payment.reduce(
+      //   (total, payment) => total + payment.price, 0
+      // );
+
+      const result = await paymentCollection.aggregate([
+        {
+          $group: {
+            _id: null,
+            totalRevenue: {
+              $sum: '$price'
+            }
+          }
+        }
+      ]).toArray();
+
+      const revenue = result.length > 0 ? result[0].totalRevenue : 0; 
+
+      res.send({
+        users,
+        menuItems,
+        orders,
+        revenue
+      });
+    });
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
